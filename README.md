@@ -25,3 +25,7 @@ Stay safe, and happy voting!
 <br>
 
 ![](img/map.png)
+
+![](img/map2.png)
+
+![](img/map3.png)

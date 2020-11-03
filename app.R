@@ -6,6 +6,7 @@ library(lubridate)
 library(tidyverse)
 library(scales)
 library(DT)
+# mapbox API key
 source("config.R")
 
 # import data
@@ -14,7 +15,6 @@ df <- geojsonio::geojson_read("output/wi_counties.geojson", what = "sp")
 df$date = as.Date(df$date)
 cv_min_date = as.Date(min(df$date),"%Y-%m-%d")
 current_date = as.Date(max(df$date),"%Y-%m-%d")
-
 
 ui <- bootstrapPage(
     tags$style(type = "text/css", "html, body {width:100%;height:100%}"),
@@ -27,7 +27,7 @@ ui <- bootstrapPage(
     h4("Wisconsin Absentee Data, 2020"),
     absolutePanel(top = 60, right = 10,
                   selectInput("variable", "Select:",
-                              list(`Absentee Ballot Data (%, Cumulative)` = list("% of Absentee Ballot Requests"="prop_reg_absentee_applied", "% of Absentee Ballots Sent Out"="prop_ballot_sent", "% of Absentee Ballots Returned"="prop_ballot_returned"),
+                              list(`Absentee Ballot Data (%, Cumulative)` = list("% of Absentee Ballot Requests"="prop_reg_absentee_applied", "% of Absentee Ballots Sent Out"="prop_ballot_sent", "% of Absentee Ballots Returned"="prop_ballot_returned", "% of In-Person Absentee Ballots"="prop_reg_absentee_person"),
                                    `Weekly Change in Absentee Ballot Requests (%)` = list("Weekly Percentage Change"="oneweek_absentee_app_prop"),
                                    `Voter Demographics (%)` = list("% of Voting Age Population Registered to Vote"="prop_vap_reg", "% of Citizen Voting Age Population Registered to Vote"="prop_cvap_reg"),
                                    `Voter Demographics (Raw Counts)` = list("Registered Voters"="reg_voter", "Voting Age Population"="vap_est", "Citizen Voting Age Population"="cvap_est","Total Population"="total_est"))),
@@ -47,8 +47,9 @@ ui <- bootstrapPage(
 
     absolutePanel(id = "controls2", class = "panel panel-default", fixed = TRUE,
                   draggable = TRUE, top = 130, left = 20, right = "auto", bottom = "auto",
-                  width = 200, height = 110, style = "background: #FBFAF7",
-                  span(uiOutput("total_requests"), style="font-weight: 400; font-size: 16px; padding: 1px;", align = "center")
+                  width = 200, height = 130, style = "background: #FBFAF7",
+                  span(uiOutput("total_requests"), style="font-weight: 400; font-size: 16px; padding: 1px;", align = "center"),
+                  span(uiOutput("last_updated"), style="font-weight: 400; font-size: 11px; padding: 1px;", align = "center"),
             )),
     tabPanel("About",
     
@@ -99,7 +100,7 @@ server <- function(input, output, session) {
     
 
     output$date.input <- renderUI({
-        if (input$variable %in% c("prop_reg_absentee_applied","prop_ballot_sent", "prop_ballot_returned", "oneday_absentee_app_prop")) {
+        if (input$variable %in% c("prop_reg_absentee_applied","prop_ballot_sent", "prop_ballot_returned", "oneday_absentee_app_prop", "prop_reg_absentee_person")) {
         sliderInput("date",
                     "Date:",
                     min = as.Date(cv_min_date,"%Y-%m-%d"),
@@ -132,7 +133,7 @@ server <- function(input, output, session) {
             ggplot( ., aes(date, `Avg. Absentee Request`))+
             geom_line(color="#9E9AC8") +
             geom_line(color="#9E9AC8", size=1, aes(text =sprintf("Date: <b>%s</b><br>Avg. Absentee Requests: <b>%g%%</b>", date, round(`Avg. Absentee Request`,2)*100))) +
-            xlab("")  + theme_minimal() + scale_y_continuous(labels = scales::percent, limits = c(.2,.4)) +
+            xlab("")  + theme_minimal() + scale_y_continuous(labels = scales::percent, limits = c(.2,.45)) +
             geom_vline(xintercept = as.numeric(ymd(input$date)), linetype="solid",
                        color = "black", size=.5)
            
@@ -170,6 +171,22 @@ server <- function(input, output, session) {
             
             ggplotly(p, tooltip=c("text"))
             
+            
+        }
+            else if (input$variable=="prop_reg_absentee_person") {
+              p<- df %>%
+                as.tibble() %>%
+                group_by(date) %>% mutate(`Avg. In-Person Absentee Ballots` = mean(prop_reg_absentee_person)) %>%
+                ggplot( ., aes(date, `Avg. In-Person Absentee Ballots`))+
+                geom_line(color="#9E9AC8") +
+                geom_line(color="#9E9AC8", size=1, aes(text =sprintf("Date: <b>%s</b><br>Avg. In-Person Absentee Ballots: <b>%g%%</b>", date, round(`Avg. In-Person Absentee Ballots`,2)*100))) +
+                xlab("")  + theme_minimal() + scale_y_continuous(labels = scales::percent) +
+                geom_vline(xintercept = as.numeric(ymd(input$date)), linetype="solid",
+                           color = "black", size=.5)
+              
+              
+              ggplotly(p, tooltip=c("text"))
+            
         }
         
         else if (input$variable=="oneweek_absentee_app_prop") {
@@ -196,6 +213,11 @@ server <- function(input, output, session) {
     output$total_requests <- renderUI({
         print( paste('Total Number of Absentee Ballots Requested Statewide:',   comma_format(digits = 12)(unique(df$total_absentee_requests)) )   )
         })  
+    
+    #last updated text
+    output$last_updated <- renderUI({
+      print( paste('Updated:', Sys.Date()-1)  )
+    }) 
     
     
     observe({
@@ -244,7 +266,7 @@ server <- function(input, output, session) {
     
 
     labels <- reactive({
-
+      
         if (input$variable=="prop_reg_absentee_applied") {
             labels <- sprintf(
                 "<strong>%s</strong><br/>%g%% Absentee Requests",
@@ -259,19 +281,47 @@ server <- function(input, output, session) {
             ) %>% lapply(htmltools::HTML)
         }
 
-        else if (input$variable=="prop_ballot_returned") {
+        else if (input$variable=="prop_reg_absentee_person") {
             labels <- sprintf(
-                "<strong>%s</strong><br/>%g%% Absentee Ballots Returned",
-                filteredData()$NAME,  filteredData()$prop_ballot_returned*100
+                "<strong>%s</strong><br/>%g%% In-Person Absentee Ballots",
+                filteredData()$NAME,  filteredData()$prop_reg_absentee_person*100
             ) %>% lapply(htmltools::HTML)
         }
+      
+      else if (input$variable=="prop_ballot_returned") {
+        labels <- sprintf(
+          "<strong>%s</strong><br/>%g%% Absentee Ballots Returned",
+          filteredData()$NAME,  filteredData()$prop_ballot_returned*100
+        ) %>% lapply(htmltools::HTML)
+      }
+      
+      else if (input$variable %in% c("prop_vap_reg", "prop_cvap_reg")) {
+        var <- input$variable
+        labels <- sprintf(
+          "<strong>%s</strong><br/>%g%%",
+          filteredData()$NAME,  filteredData()[[var]]*100
+        ) %>% lapply(htmltools::HTML)
+      }
         
         else if (input$variable=="oneweek_absentee_app_prop") {
+            req(pastweekdata())
+            req(filteredData())
+            req(input$week )
+            
+            if (input$week==4 | input$week==1 | input$week==2 | input$week==9) {
+              labels <- sprintf(
+                "<strong>%s</strong><br/><strong>%g%%</strong> Change in Requests From Last Week<br/>%s Absentee Ballot Requests This Week",
+                filteredData()$NAME,  filteredData()$oneweek_absentee_app_prop*100, filteredData()$oneweek_absentee_app.x
+              ) %>% lapply(htmltools::HTML)
+              
+            }
+            else {
             labels <- sprintf(
                 "<strong>%s</strong><br/><strong>%g%%</strong> Change in Requests From Last Week<br/>%s Absentee Ballot Requests This Week<br/>%s Absentee Ballot Requests Last Week",
                 filteredData()$NAME,  filteredData()$oneweek_absentee_app_prop*100, 
                 filteredData()$oneweek_absentee_app.x, pastweekdata()$oneweek_absentee_app.x
             ) %>% lapply(htmltools::HTML)
+            }
         }
 
         
@@ -299,12 +349,13 @@ server <- function(input, output, session) {
 
 
     observe({
+      
         if (input$variable=="prop_reg_absentee_applied") {
             pal <- colorBin(palette="Purples", domain = df$prop_reg_absentee_applied, bins=5, pretty = T)
         }
         
         else if (input$variable=="prop_ballot_sent") {
-            pal <- colorQuantile(palette="Purples", domain = df$prop_ballot_sent, n=5)
+          pal <- colorQuantile(palette="Purples", domain = unique(df$prop_ballot_sent), n=5)
             
         }
         
@@ -312,6 +363,9 @@ server <- function(input, output, session) {
             pal <- colorQuantile(palette="Purples", domain = df$prop_ballot_returned, n=5)
         }
         
+        else if (input$variable=="prop_reg_absentee_person") {
+          pal <- colorBin(palette="Purples", domain = df$prop_reg_absentee_person, bins=3)
+        }
         
         else if (input$variable %in% c("prop_vap_reg", "prop_cvap_reg")) {
             var <- input$variable
@@ -331,7 +385,7 @@ server <- function(input, output, session) {
             pal <- colorQuantile(palette="RdYlGn", domain = df$oneweek_absentee_app_prop, n=10)
         }
         
-        
+      
         leafletProxy("map", data = filteredData()) %>%
             addPolygons( weight = 1,
                           opacity = 1,
@@ -341,7 +395,7 @@ server <- function(input, output, session) {
                           fillColor = ~pal(get(input$variable)),
                           highlight = highlightOptions(
                               weight = 5,
-                              color = "#808080",
+                              color = "#292929", # "#808080",
                               dashArray = "",
                               fillOpacity = 6,
                               bringToFront = T),
@@ -350,6 +404,7 @@ server <- function(input, output, session) {
                               style = list("font-weight" = "normal", padding = "3px 8px"),
                               textsize = "15px",
                               direction = "auto"))
+
             
     })
 
@@ -365,11 +420,15 @@ server <- function(input, output, session) {
         }
         
         else if (input$variable=="prop_ballot_sent") {
-            pal <- colorQuantile(palette="Purples", domain = df$prop_ballot_sent, n=5)
+          pal <- colorQuantile(palette="Purples", domain = unique(df$prop_ballot_sent), n=5)
         }
         
         else if (input$variable=="prop_ballot_returned") {
             pal <- colorQuantile(palette="Purples", domain = df$prop_ballot_returned, n=5)
+        }
+        
+        else if (input$variable=="prop_reg_absentee_person") {
+          pal <- colorBin(palette="Purples", domain = df$prop_reg_absentee_person, bins=3)
         }
         
         else if (input$variable %in% c("prop_vap_reg", "prop_cvap_reg")) {
@@ -389,7 +448,7 @@ server <- function(input, output, session) {
      
         proxy %>% clearControls()
         if (input$legend) {
-            if (input$variable %in% c("prop_reg_absentee_applied","prop_ballot_sent", "prop_ballot_returned")) {
+            if (input$variable %in% c("prop_reg_absentee_applied","prop_ballot_sent", "prop_ballot_returned", "prop_reg_absentee_person")) {
             proxy %>% addLegend(position = "bottomright", title="",na.label = "No data",
                                 pal = pal, 
                                 values = ~get(input$variable),
